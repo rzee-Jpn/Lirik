@@ -4,7 +4,7 @@ import glob
 from pathlib import Path
 from .parser import parse_txt, parse_csv, parse_html
 from .smart_merger import merge_song_into_artist
-from .utils import save_json, load_json, safe_slug, now_iso, guess_artist_from_filename
+from scripts.utils import save_json, load_json, safe_slug, now_iso, guess_artist_from_filename
 
 DATA_DIR = Path('datalake')
 ARTISTS_DIR = Path('artists')
