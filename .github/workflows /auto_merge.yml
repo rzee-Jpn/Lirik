@@ -1,29 +1,49 @@
-name: Auto Merge Lyrics
+name: Auto Parse & Merge Lyrics Data
 
 on:
   push:
     paths:
-      - 'datalake/**'
-  workflow_dispatch:
+      - 'data_raw/**'
+      - 'scripts/**'
+      - '.github/workflows/update-json.yml'
+    branches:
+      - main
+  workflow_dispatch:   # bisa dijalankan manual
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install deps
-        run: pip install -r requirements.txt
-      - name: Run parser & merge
-        run: python -m scripts.main
-      - name: Commit artists
+
+      - name: 📦 Install dependencies
         run: |
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git add artists/
-          git commit -m "chore: auto update artists/ from datalake" || echo "no changes"
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install rapidfuzz beautifulsoup4 lxml requests
+
+      - name: 🧩 Parse new raw data
+        run: |
+          echo "🔍 Running parser.py..."
+          python scripts/parser.py
+
+      - name: 🔗 Merge updated data
+        run: |
+          echo "🧠 Merging with existing clean JSON..."
+          python scripts/merger.py
+
+      - name: 💾 Commit & Push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data_clean/
+          git commit -m "Auto update lyrics data $(date '+%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
           git push
