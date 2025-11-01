@@ -1,7 +1,7 @@
 # parser.py
 import csv
 from bs4 import BeautifulSoup
-from .utils import guess_artist_from_filename
+from scripts.utils import guess_artist_from_filename
 
 
 def parse_txt(path):
