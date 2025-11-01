@@ -33,12 +33,12 @@ jobs:
       - name: 🧩 Parse new raw data
         run: |
           echo "🔍 Running parser.py..."
-          python scripts/parser.py
+    python -m scripts.parser
 
       - name: 🔗 Merge updated data
         run: |
           echo "🧠 Merging with existing clean JSON..."
-          python scripts/merger.py
+        python -m scripts.merger
 
       - name: 💾 Commit & Push changes
         run: |
