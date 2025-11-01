@@ -1,0 +1,7 @@
+beautifulsoup4
+lxml
+python-slugify
+rapidfuzz
+requests
+pandas
+python-dotenv
