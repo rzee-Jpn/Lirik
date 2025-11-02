@@ -1,13 +1,13 @@
 name: 🎵 Auto Parse & Merge Lyrics
 
 permissions:
-  contents: write   # biar github-actions[bot] bisa push
+  contents: write
 
 on:
   push:
     paths:
-      - 'data_raw/**'       # kalau ada file baru di folder ini, workflow otomatis jalan
-  workflow_dispatch:         # bisa dijalankan manual dari tab "Actions"
+      - 'data_raw/**'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 📚 Install dependencies (if available)
+      - name: 📚 Install dependencies
         run: |
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
@@ -56,10 +56,10 @@ jobs:
           else
             git commit -m "auto: update lyrics JSON 🪄"
 
-            # ✅ Tarik dulu perubahan terbaru biar gak bentrok
-            git pull --rebase origin main || echo "⚠️ No changes to pull, continuing..."
+            # ⤵️ Pull dulu biar sinkron sebelum push
+            git pull --rebase origin main || echo "⚠️ No remote changes, continuing..."
 
-            # ✅ Gunakan GH_PAT kalau tersedia
+            # 🚀 Push pakai PAT kalau ada, fallback ke GITHUB_TOKEN
             git push https://${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git main
             echo "🚀 Changes pushed successfully!"
           fi
