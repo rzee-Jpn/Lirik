@@ -25,6 +25,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install tiktoken
+        run: pip install tiktoken
+
       - name: 📚 Install dependencies
         run: |
             pip install groq beautifulsoup4 lxml tqdm
