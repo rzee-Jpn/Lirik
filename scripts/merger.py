@@ -1,9 +1,11 @@
 import os, sys, json
 
-# ===== FIX IMPORT PATH =====
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-# ===========================
+# ===== FIX IMPORT PATH (universal) =====
+root_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.abspath(os.path.join(root_dir)))            # /scripts
+sys.path.append(os.path.abspath(os.path.join(root_dir, "..")))      # / (root)
+sys.path.append(os.path.abspath(os.path.join(root_dir, "utils")))   # /scripts/utils
+# =======================================
 
 OUTPUT_DIR = "data_clean"
 FINAL_JSON = os.path.join(OUTPUT_DIR, "songs_merged.json")
