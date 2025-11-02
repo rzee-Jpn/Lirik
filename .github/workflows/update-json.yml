@@ -33,15 +33,10 @@ jobs:
             echo "⚠️ No requirements.txt found, skipping..."
           fi
 
-      - name: 🔍 Run parser
+      - name: 🎵 Run new parser
         run: |
-          echo "🔍 Running parser.py..."
-          python -m scripts.parser || (echo "❌ parser.py failed!" && exit 1)
-
-      - name: 🧩 Merge JSONs
-        run: |
-          echo "🧩 Running merger.py..."
-          python -m scripts.merger || (echo "❌ merger.py failed!" && exit 1)
+          echo "🎵 Running new parser (per artist)..."
+        python -m scripts.parser || (echo "❌ parser failed!" && exit 1)
 
       - name: 💾 Commit & Push changes
         run: |
