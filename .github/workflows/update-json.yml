@@ -1,43 +1,36 @@
-name: 🔄 Auto Parse and Merge Lyrics Data
+name: Update Lyrics JSON
 
 on:
   push:
     paths:
-      - "raw_data/**"
+      - "data_raw/**"
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: 🧩 Checkout repository
-      uses: actions/checkout@v4
+      - name: 🧩 Checkout repository
+        uses: actions/checkout@v4
 
-    - name: 🐍 Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-    - name: 📦 Install dependencies
-      run: |
-        pip install --upgrade pip
-        pip install pandas beautifulsoup4 lxml
+      - name: 📦 Install dependencies
+        run: pip install --upgrade pip
 
-    - name: 🧠 Parse new raw data
-      run: |
-        echo "🔍 Running parser.py..."
-        python -m scripts.parser
+      - name: 🔍 Run parser
+        run: python -m scripts.parser
 
-    - name: 🔗 Merge updated data
-      run: |
-        echo "🧠 Merging with existing clean JSON..."
-        python -m scripts.merger
+      - name: 🔗 Merge parsed JSON
+        run: python -m scripts.merger
 
-    - name: 💾 Commit results
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add clean_data/songs.json || true
-        git commit -m "Auto update songs.json" || echo "No changes to commit"
-        git push
+      - name: 🧾 Commit and push results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@github.com"
+          git add data_clean/
+          git commit -m "auto: update lyrics JSON" || echo "no changes"
+          git push
