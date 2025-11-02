@@ -1,110 +1,107 @@
-# scripts/parser_groq.py
-import os, json, groq
+import os
+import json
 from bs4 import BeautifulSoup
 from datetime import datetime
-from pathlib import Path
+from groq import Groq
 
-from scripts.utils.schema_artist import base_artist_schema, base_song_schema
-from scripts.utils.merge_utils import merge_dict, merge_song_into_artist
+# Ambil API key & model dari environment
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
-# === KONFIGURASI ===
-DATA_RAW = Path("data_raw")
-DATA_CLEAN = Path("data_clean/artists")
-DATA_CLEAN.mkdir(parents=True, exist_ok=True)
+def extract_text_from_html(file_path):
+    """Ambil teks dari HTML (hapus tag, ambil konten utama)."""
+    with open(file_path, "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f, "lxml")
+    # Ambil bagian teks utama
+    text = soup.get_text(separator="\n", strip=True)
+    return text
 
-client = groq.Client(api_key=os.getenv("GROQ_API_KEY"))
-
-def parse_html_with_groq(file_path):
-    """Baca HTML dan kirim ke Groq untuk diparse jadi JSON"""
-    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-        soup = BeautifulSoup(f, "html.parser")
-        text = soup.get_text("\n", strip=True)
-
+def parse_html_with_groq(html_text: str):
+    """Gunakan Groq untuk parsing HTML jadi JSON lirik + info artis."""
     prompt = f"""
-Kamu adalah asisten untuk mengekstrak informasi musik dari teks berikut.
-Buat output JSON dengan struktur:
+Kamu adalah asisten yang mengekstrak lirik lagu dari HTML dan mengubahnya menjadi JSON terstruktur.
+Hasilkan JSON dengan format seperti ini:
+
 {{
   "artist": {{
     "nama_asli": "",
     "nama_panggung": "",
     "tanggal_lahir": "",
     "asal": "",
-    "genre": [],
     "media_sosial": {{
-      "instagram": "", "twitter": "", "youtube": "", "website": ""
+      "instagram": "",
+      "x": "",
+      "tiktok": "",
+      "youtube": ""
     }},
     "label": "",
-    "biografi": ""
+    "pembuat_lirik": "",
+    "komposer": "",
+    "aransemen": "",
+    "produser": ""
   }},
+  "updated_at": "{datetime.utcnow().isoformat()}Z",
   "songs": [
     {{
       "judul_lagu": "",
       "album": "",
       "tahun_rilis": "",
-      "tipe": "",
-      "track_number": "",
-      "penulis_lirik": [],
-      "komposer": [],
-      "aransemen": [],
-      "genre": [],
-      "durasi": "",
-      "label": "",
+      "genre": "",
       "lirik_dengan_chord": "",
-      "terjemahan": "",
-      "sumber": "{os.path.basename(file_path)}",
-      "tanggal_update": "{datetime.utcnow().isoformat()}Z",
-      "tambahan": {{}}
+      "sumber": "lirik.html"
     }}
   ]
 }}
 
-Isi data seakurat mungkin dari teks berikut.
-Jika tidak ada informasi, biarkan string kosong.
+Jika tidak ditemukan informasinya, isi dengan string kosong ("").
+Pastikan format JSON valid.
+Berikut konten HTML-nya:
 
-Teks:
-{text[:6000]}
+---
+{html_text}
+---
 """
 
-    resp = client.chat.completions.create(
-        model="llama3-8b-8192",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
-    )
-
     try:
-        data = json.loads(resp.choices[0].message["content"])
-        return data
+        resp = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": "Kamu adalah parser HTML yang menghasilkan JSON lagu dan metadata artis."},
+                {"role": "user", "content": prompt}
+            ],
+        )
+        return resp.choices[0].message.content
     except Exception as e:
-        print(f"⚠️ JSON gagal diparse dari {file_path}: {e}")
+        print(f"❌ Error parsing dengan model {MODEL}: {e}")
         return None
 
-def save_artist_json(artist_name, data):
-    slug = artist_name.lower().replace(" ", "-")
-    path = DATA_CLEAN / f"{slug}.json"
-
-    if path.exists():
-        with open(path, "r", encoding="utf-8") as f:
-            old = json.load(f)
-    else:
-        old = base_artist_schema()
-
-    merged = merge_dict(old, data)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(merged, f, ensure_ascii=False, indent=2)
-
-    print(f"💾 Saved: {path}")
 
 if __name__ == "__main__":
-    files = list(DATA_RAW.glob("*.html"))
-    for f in files:
-        print(f"🔍 Parsing {f.name}...")
-        parsed = parse_html_with_groq(f)
-        if not parsed:
-            continue
+    data_raw_path = "data_raw/lirik.html"
+    output_path = "data_clean/lirik_parsed.json"
 
-        artist_name = (
-            parsed.get("artist", {}).get("nama_panggung")
-            or parsed.get("artist", {}).get("nama_asli")
-            or "unknown"
-        )
-        save_artist_json(artist_name, parsed)
+    print("🔍 Parsing lirik.html...")
+
+    if not os.path.exists(data_raw_path):
+        print("⚠️ File data_raw/lirik.html tidak ditemukan.")
+        exit(1)
+
+    html_text = extract_text_from_html(data_raw_path)
+    parsed_json_str = parse_html_with_groq(html_text)
+
+    if not parsed_json_str:
+        print("❌ Parsing gagal — tidak ada output dari Groq.")
+        exit(1)
+
+    # Coba ubah ke JSON
+    try:
+        parsed_data = json.loads(parsed_json_str)
+    except json.JSONDecodeError:
+        print("⚠️ Output tidak valid JSON, menyimpan sebagai teks mentah...")
+        parsed_data = {"raw_output": parsed_json_str}
+
+    os.makedirs("data_clean", exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(parsed_data, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ Parsing selesai! Disimpan ke: {output_path}")
