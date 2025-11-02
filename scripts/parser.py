@@ -1,12 +1,18 @@
 import os, sys, json, glob
 
 # ===== FIX IMPORT PATH (universal) =====
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+root_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.abspath(os.path.join(root_dir)))            # /scripts
+sys.path.append(os.path.abspath(os.path.join(root_dir, "..")))      # / (root)
+sys.path.append(os.path.abspath(os.path.join(root_dir, "utils")))   # /scripts/utils
 # =======================================
 
-from scripts.utils.text_tools import extract_lyrics_info
-from scripts.utils.schema import build_song_json
+try:
+    from scripts.utils.text_tools import extract_lyrics_info
+    from scripts.utils.schema import build_song_json
+except ModuleNotFoundError:
+    from utils.text_tools import extract_lyrics_info
+    from utils.schema import build_song_json
 
 RAW_DIR = "data_raw"
 OUTPUT_DIR = "data_clean"
