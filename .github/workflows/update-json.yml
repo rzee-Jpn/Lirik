@@ -36,19 +36,19 @@ jobs:
       - name: 🎵 Run new parser
         run: |
           echo "🎵 Running new parser (per artist)..."
-        python -m scripts.parser || (echo "❌ parser failed!" && exit 1)
+          python -m scripts.parser || (echo "❌ parser failed!" && exit 1)
 
       - name: 💾 Commit & Push changes
         run: |
           echo "💾 Checking for changes..."
           git config user.name "github-actions[bot]"
           git config user.email "actions@github.com"
-          git add data_clean/
+          git add artists/
 
           if git diff --cached --quiet; then
             echo "✅ No changes to commit."
           else
-            git commit -m "auto: update lyrics JSON 🪄"
+            git commit -m "auto: update artist JSON 🪄"
 
             # 🔁 Pastikan branch lokal up-to-date dulu
             git pull --rebase origin main || echo "⚠️ Nothing to rebase, continue..."
