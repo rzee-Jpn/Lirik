@@ -1,13 +1,13 @@
-name: 🎵 Auto Parse & Merge Lyrics
+name: 🎵 Auto Parse & Merge Lyrics (Groq)
 
 permissions:
-  contents: write   # izinkan actions push ke repo
+  contents: write
 
 on:
   push:
     paths:
-      - 'data_raw/**'       # kalau ada file baru/ubah di data_raw, otomatis jalan
-  workflow_dispatch:         # bisa dijalankan manual juga
+      - 'data_raw/**'     # jalan kalau ada file baru di data_raw
+  workflow_dispatch:       # bisa dijalankan manual
 
 jobs:
   build:
@@ -33,32 +33,29 @@ jobs:
             echo "⚠️ No requirements.txt found, skipping..."
           fi
 
-      - name: 🎵 Run new parser
+      - name: 🤖 Run Groq Parser
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
-          echo "🎵 Running new parser (per artist)..."
-          python -m scripts.parser || (echo "❌ parser failed!" && exit 1)
+          echo "🤖 Parsing HTML with Groq..."
+          python -m scripts.parser_groq || (echo "❌ parser_groq failed!" && exit 1)
 
       - name: 💾 Commit & Push changes
         run: |
           echo "💾 Checking for changes..."
           git config user.name "github-actions[bot]"
           git config user.email "actions@github.com"
-          git add artists/
+          git add data_clean/
 
           if git diff --cached --quiet; then
             echo "✅ No changes to commit."
           else
-            git commit -m "auto: update artist JSON 🪄"
-
-            # 🔁 Pastikan branch lokal up-to-date dulu
+            git commit -m "auto: update artist JSON via Groq 🪄"
             git pull --rebase origin main || echo "⚠️ Nothing to rebase, continue..."
-
-            # 🚀 Push dengan retry 3x jika gagal
             for i in {1..3}; do
               git push https://${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git main && break
               echo "⚠️ Push failed, retrying in 5s... ($i/3)"
               sleep 5
             done
-
             echo "🚀 Changes pushed successfully!"
           fi
