@@ -1,126 +1,125 @@
-import os
-import json
-import time
+import os, json, datetime, time
 from bs4 import BeautifulSoup
-from datetime import datetime
 from groq import Groq
-from tqdm import tqdm
 
-# === CONFIG ===
-MODEL = "mixtral-8x7b-32768"  # model Groq yang aktif & kuat
+# 🧠 Model fallback system — urut dari yang paling bagus
+MODEL_CANDIDATES = [
+    "llama-3.1-70b-versatile",   # utama
+    "gemma2-9b-it",              # cepat, pintar
+    "llama-3.1-8b-instant",      # darurat
+]
+
+# 🔑 Ambil API key dari env
+API_KEY = os.getenv("GROQ_API_KEY")
+if not API_KEY:
+    raise RuntimeError("❌ GROQ_API_KEY tidak ditemukan di environment.")
+
+client = Groq(api_key=API_KEY)
+
+# 📁 Folder input/output
 RAW_DIR = "data_raw"
-CLEAN_DIR = "data_clean"
+OUT_DIR = "data_clean"
+os.makedirs(OUT_DIR, exist_ok=True)
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# 🧠 fungsi fallback otomatis
+def groq_request(messages):
+    for model in MODEL_CANDIDATES:
+        try:
+            print(f"🧠 Mencoba model: {model}")
+            resp = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=2048,
+            )
+            print(f"✅ Berhasil pakai model: {model}")
+            return resp.choices[0].message.content
+        except Exception as e:
+            print(f"⚠️ Model {model} gagal: {e}")
+            time.sleep(2)
+    raise RuntimeError("❌ Semua model Groq gagal dipakai.")
 
-def extract_clean_text(file_path):
-    """Ambil teks bersih dari file HTML."""
+# 🧩 fungsi untuk parse HTML
+def parse_html_with_groq(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f, "lxml")
+        html_content = f.read()
 
-    for tag in soup(["script", "style", "meta", "link", "noscript"]):
-        tag.decompose()
+    soup = BeautifulSoup(html_content, "lxml")
+    text = soup.get_text(separator="\n", strip=True)
 
-    text = soup.get_text("\n", strip=True)
-    lines = [line for line in text.splitlines() if len(line.strip()) > 2]
-    return "\n".join(lines[:4000])  # batasi panjang teks
-
-def parse_with_groq(text, source_name):
-    """Parsing teks ke JSON menggunakan Groq API."""
     prompt = f"""
-Ubah teks berikut menjadi JSON berisi informasi artis dan lagu.
+Kamu adalah parser yang mengekstrak data artis dan lagu dari teks berikut.
 
-Format JSON yang diharapkan:
+Tugasmu:
+1. Deteksi nama artis dan semua metadata (nama asli, tanggal lahir, nama panggung, asal, label, media sosial).
+2. Ambil daftar lagu dan untuk tiap lagu tulis:
+   - judul_lagu
+   - album (jika ada)
+   - tahun_rilis
+   - pembuat_lirik
+   - composer
+   - arranger
+   - aransemen
+   - lirik_dengan_chord (preserve format chord di atas lirik)
+3. Jika ada data tidak ditemukan, tulis string kosong.
+
+Output dalam format JSON seperti ini:
 {{
   "artist": {{
-    "nama_asli": "",
-    "nama_panggung": "",
-    "tanggal_lahir": "",
-    "asal": "",
-    "media_sosial": {{
-      "instagram": "",
-      "x": "",
-      "tiktok": "",
-      "youtube": ""
-    }},
-    "label": "",
-    "pembuat_lirik": "",
-    "komposer": "",
-    "aransemen": "",
-    "produser": ""
+    "nama_asli": "...",
+    "nama_panggung": "...",
+    "tanggal_lahir": "...",
+    "asal": "...",
+    "label": "...",
+    "media_sosial": {{}}
   }},
+  "updated_at": "{datetime.datetime.utcnow().isoformat()}Z",
   "songs": [
     {{
-      "judul_lagu": "",
-      "album": "",
+      "judul_lagu": "...",
+      "album": "...",
       "tahun_rilis": "",
-      "genre": "",
-      "lirik_dengan_chord": "",
-      "sumber": "{source_name}"
+      "pembuat_lirik": "",
+      "composer": "",
+      "arranger": "",
+      "aransemen": "",
+      "lirik_dengan_chord": "..."
     }}
   ]
 }}
 
-Jika tidak ditemukan, biarkan string kosong. 
-Jangan tambahkan penjelasan — hanya JSON valid.
----
-{text}
----
+Berikut teks yang perlu diproses:
+{text[:30000]}
 """
-    resp = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": "Kamu parser teks lagu dan metadata artis. Keluarkan hanya JSON valid."},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    return resp.choices[0].message.content.strip()
-
-def process_file(file_path):
-    """Proses 1 file HTML → JSON."""
-    fname = os.path.basename(file_path)
-    text = extract_clean_text(file_path)
 
     try:
-        result = parse_with_groq(text, fname)
-        try:
-            data = json.loads(result)
-        except json.JSONDecodeError:
-            print(f"⚠️ Hasil Groq tidak valid JSON di {fname} — disimpan mentah.")
-            data = {"raw_output": result}
+        response_text = groq_request([
+            {"role": "system", "content": "Kamu adalah parser JSON yang disiplin dan hanya mengeluarkan JSON valid."},
+            {"role": "user", "content": prompt}
+        ])
+        data = json.loads(response_text)
+        return data
     except Exception as e:
-        print(f"❌ Gagal parsing {fname}: {e}")
-        data = {"artist": {}, "songs": []}
+        print(f"❌ Gagal parsing {file_path}: {e}")
+        return None
 
-    data["updated_at"] = f"{datetime.utcnow().isoformat()}Z"
-    return data
+# 🚀 Main process
+print("📂 Mendeteksi file HTML di folder:", RAW_DIR)
+html_files = [f for f in os.listdir(RAW_DIR) if f.lower().endswith(".html")]
+print(f"🔍 Ditemukan {len(html_files)} file HTML untuk diproses.\n")
 
-if __name__ == "__main__":
-    os.makedirs(CLEAN_DIR, exist_ok=True)
-    files = [f for f in os.listdir(RAW_DIR) if f.endswith(".html")]
+for file_name in html_files:
+    file_path = os.path.join(RAW_DIR, file_name)
+    print(f"🔄 Memproses: {file_name}")
 
-    if not files:
-        print("⚠️ Tidak ada file .html di folder data_raw/")
-        exit(0)
+    parsed_data = parse_html_with_groq(file_path)
+    if parsed_data:
+        artist_name = parsed_data.get("artist", {}).get("nama_panggung", "unknown").strip() or "unknown"
+        output_file = os.path.join(OUT_DIR, f"{artist_name.replace(' ', '_').lower()}.json")
+        with open(output_file, "w", encoding="utf-8") as out:
+            json.dump(parsed_data, out, indent=2, ensure_ascii=False)
+        print(f"✅ Disimpan → {output_file}\n")
+    else:
+        print(f"⚠️ Tidak bisa parse file {file_name}\n")
 
-    print(f"📂 Ditemukan {len(files)} file HTML untuk diproses.\n")
-
-    start_time = time.time()
-
-    for fname in tqdm(files, desc="🔄 Memproses file HTML", unit="file"):
-        fpath = os.path.join(RAW_DIR, fname)
-        data = process_file(fpath)
-
-        output_path = os.path.join(
-            CLEAN_DIR,
-            os.path.splitext(fname)[0] + ".json"
-        )
-
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-        time.sleep(1)  # kasih jeda aman antar request (biar gak rate limit)
-
-    elapsed = time.time() - start_time
-    print(f"\n🎉 Semua file selesai dalam {elapsed:.1f} detik!")
-    print(f"📁 Hasil tersimpan di folder: {CLEAN_DIR}/")
+print("🎉 Semua file selesai diproses!")
