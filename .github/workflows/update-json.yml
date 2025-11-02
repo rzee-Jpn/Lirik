@@ -1,36 +1,61 @@
-name: Update Lyrics JSON
+name: 🎵 Auto Parse & Merge Lyrics
+
+permissions:
+  contents: write   # biar github-actions[bot] bisa push
 
 on:
   push:
     paths:
-      - "data_raw/**"
-  workflow_dispatch:
+      - 'data_raw/**'       # kalau ada file baru di folder ini, workflow otomatis jalan
+  workflow_dispatch:         # bisa dijalankan manual dari tab "Actions"
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 🧩 Checkout repository
+      - name: 📦 Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: 📦 Install dependencies
-        run: pip install --upgrade pip
+      - name: 📚 Install dependencies (if available)
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "⚠️ No requirements.txt found, skipping..."
+          fi
 
       - name: 🔍 Run parser
-        run: python -m scripts.parser
-
-      - name: 🔗 Merge parsed JSON
-        run: python -m scripts.merger
-
-      - name: 🧾 Commit and push results
         run: |
+          echo "🔍 Running parser.py..."
+          python -m scripts.parser || (echo "❌ parser.py failed!" && exit 1)
+
+      - name: 🧩 Merge JSONs
+        run: |
+          echo "🧩 Running merger.py..."
+          python -m scripts.merger || (echo "❌ merger.py failed!" && exit 1)
+
+      - name: 💾 Commit & Push changes
+        run: |
+          echo "💾 Checking for changes..."
           git config user.name "github-actions[bot]"
           git config user.email "actions@github.com"
+
           git add data_clean/
-          git commit -m "auto: update lyrics JSON" || echo "no changes"
-          git push
+
+          # Commit hanya kalau ada perubahan baru
+          if git diff --cached --quiet; then
+            echo "✅ No changes to commit."
+          else
+            git commit -m "auto: update lyrics JSON 🪄"
+            git push
+            echo "🚀 Changes pushed successfully!"
+          fi
