@@ -1,38 +1,44 @@
-import json, os
-from scripts.utils.schema import base_song_template
+import os, sys, json
 
-MAIN_JSON = "clean_data/songs.json"
-TEMP_JSON = "clean_data/temp_parsed.json"
+# ===== FIX IMPORT PATH =====
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+# ===========================
 
-def merge_data():
-    if not os.path.exists(TEMP_JSON):
-        print("⚠️ No temp data to merge.")
-        return
+OUTPUT_DIR = "data_clean"
+FINAL_JSON = os.path.join(OUTPUT_DIR, "songs_merged.json")
+TEMP_PARSED = os.path.join(OUTPUT_DIR, "temp_parsed.json")
 
-    existing = []
-    if os.path.exists(MAIN_JSON):
-        with open(MAIN_JSON, "r", encoding="utf-8") as f:
-            existing = json.load(f)
+def load_json(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
-    with open(TEMP_JSON, "r", encoding="utf-8") as f:
-        new_data = json.load(f)
+def smart_merge(old_data, new_data):
+    merged = {d["judul_lagu"].lower(): d for d in old_data}
 
-    merged = {song["unique_id"]: song for song in existing}
     for song in new_data:
-        uid = song["unique_id"]
-        if uid not in merged:
-            merged[uid] = song
+        key = song["judul_lagu"].lower()
+        if key in merged:
+            # update field tanpa hapus data lama
+            for k, v in song.items():
+                if v and (v != merged[key].get(k)):
+                    merged[key][k] = v
         else:
-            # hanya tambahkan field baru tanpa hapus data lama
-            for key, val in song.items():
-                if val and key not in merged[uid]:
-                    merged[uid][key] = val
+            merged[key] = song
 
-    final = list(merged.values())
-    with open(MAIN_JSON, "w", encoding="utf-8") as f:
-        json.dump(final, f, ensure_ascii=False, indent=2)
+    return list(merged.values())
 
-    print(f"✅ Merged {len(new_data)} new entries → {len(final)} total songs")
+def merge_all():
+    old = load_json(FINAL_JSON)
+    new = load_json(TEMP_PARSED)
+    merged = smart_merge(old, new)
+
+    with open(FINAL_JSON, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ Merged {len(new)} songs → total {len(merged)} saved to {FINAL_JSON}")
 
 if __name__ == "__main__":
-    merge_data()
+    merge_all()
