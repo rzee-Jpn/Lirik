@@ -1,13 +1,13 @@
 name: 🎵 Auto Parse & Merge Lyrics
 
 permissions:
-  contents: write
+  contents: write   # izinkan actions push ke repo
 
 on:
   push:
     paths:
-      - 'data_raw/**'
-  workflow_dispatch:
+      - 'data_raw/**'       # kalau ada file baru/ubah di data_raw, otomatis jalan
+  workflow_dispatch:         # bisa dijalankan manual juga
 
 jobs:
   build:
@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 📚 Install dependencies
+      - name: 📚 Install dependencies (if available)
         run: |
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
@@ -48,7 +48,6 @@ jobs:
           echo "💾 Checking for changes..."
           git config user.name "github-actions[bot]"
           git config user.email "actions@github.com"
-
           git add data_clean/
 
           if git diff --cached --quiet; then
@@ -56,10 +55,15 @@ jobs:
           else
             git commit -m "auto: update lyrics JSON 🪄"
 
-            # ⤵️ Pull dulu biar sinkron sebelum push
-            git pull --rebase origin main || echo "⚠️ No remote changes, continuing..."
+            # 🔁 Pastikan branch lokal up-to-date dulu
+            git pull --rebase origin main || echo "⚠️ Nothing to rebase, continue..."
 
-            # 🚀 Push pakai PAT kalau ada, fallback ke GITHUB_TOKEN
-            git push https://${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git main
+            # 🚀 Push dengan retry 3x jika gagal
+            for i in {1..3}; do
+              git push https://${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git main && break
+              echo "⚠️ Push failed, retrying in 5s... ($i/3)"
+              sleep 5
+            done
+
             echo "🚀 Changes pushed successfully!"
           fi
