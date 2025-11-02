@@ -1,140 +1,135 @@
-import os, sys, json, glob
-from pathlib import Path
+import os, json, re, csv, glob
 from datetime import datetime
 from bs4 import BeautifulSoup
-from difflib import SequenceMatcher  # untuk fuzzy matching
 
-# ===== PATH FIX =====
-root_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.abspath(os.path.join(root_dir, "..")))
-# ====================
-
-RAW_DIR = Path("data_raw")
-OUTPUT_DIR = Path("artists")
-OUTPUT_DIR.mkdir(exist_ok=True)
+RAW_DIR = "data_raw"
+OUTPUT_DIR = "data_clean"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
-# ==================== UTILITIES ====================
-def safe_slug(name):
-    return name.lower().replace(" ", "-").replace("/", "-").strip()
-
-def load_json(path: Path):
-    if not path.exists():
-        return None
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-def save_json(path: Path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
+# ========= UTILITAS =========
 def now_iso():
     return datetime.utcnow().isoformat() + "Z"
 
-def similarity(a, b):
-    """Hitung kemiripan dua string (0.0 - 1.0)."""
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
-# ====================================================
+def safe_slug(name):
+    return re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
 
 
-# ====================================================
-# 🧩 PARSER DASAR (HTML & TXT)
-# ====================================================
-def extract_lyrics_info(text: str, filename: str):
-    info = {
-        "judul_lagu": "",
-        "artis": "",
-        "album": "",
-        "tahun_rilis": "",
-        "lirik_dengan_chord": "",
-        "sumber": filename,
+# ========= PARSING TEKS FLEXIBLE =========
+def parse_text_block(text, filename):
+    # Ambil artis dan judul dari nama file: "Noah - Yang Terdalam.html"
+    artist, title = "", ""
+    match = re.match(r"(.+?)\s*-\s*(.+?)\.[a-zA-Z]+$", filename)
+    if match:
+        artist = match.group(1).strip()
+        title = match.group(2).strip()
+    else:
+        title = os.path.splitext(filename)[0]
+
+    # Cari metadata umum
+    album = re.search(r"Album[:\-]?\s*(.+)", text, re.IGNORECASE)
+    release = re.search(r"(Rilis|Tahun)[:\-]?\s*(\d{4})", text, re.IGNORECASE)
+
+    # Gabungkan lirik & chord (deteksi otomatis)
+    lines = text.splitlines()
+    lyric_lines = []
+    for line in lines:
+        if re.fullmatch(r"[A-G][#b]?m?(?:\s+[A-G][#b]?m?)*", line.strip()):
+            lyric_lines.append(line.strip())
+        elif line.strip():
+            lyric_lines.append(line.strip())
+
+    lirik_dengan_chord = "\n".join(lyric_lines)
+
+    return {
+        "judul_lagu": title,
+        "artis": artist,
+        "album": album.group(1).strip() if album else "",
+        "tahun_rilis": release.group(2).strip() if release else "",
+        "lirik_dengan_chord": lirik_dengan_chord,
+        "sumber": filename
     }
 
-    # --- HTML ---
-    if "<html" in text.lower():
-        soup = BeautifulSoup(text, "html.parser")
-        title_tag = soup.find("title")
-        info["judul_lagu"] = title_tag.text.strip() if title_tag else ""
-        pre = soup.find("pre")
-        lyrics_block = soup.find(class_="lyrics") or pre
-        if lyrics_block:
-            info["lirik_dengan_chord"] = lyrics_block.get_text("\n", strip=True)
+
+# ========= PARSING HTML =========
+def parse_html(path):
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        html = f.read()
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text("\n", strip=True)
+    return parse_text_block(text, os.path.basename(path))
+
+
+# ========= PARSING TXT =========
+def parse_txt(path):
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        text = f.read()
+    return parse_text_block(text, os.path.basename(path))
+
+
+# ========= PARSING CSV =========
+def parse_csv(path):
+    songs = []
+    with open(path, newline='', encoding="utf-8", errors="ignore") as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            songs.append({
+                "judul_lagu": row.get("judul_lagu") or row.get("title") or "",
+                "artis": row.get("artis") or row.get("artist") or "",
+                "album": row.get("album") or "",
+                "tahun_rilis": row.get("tahun_rilis") or row.get("year") or "",
+                "lirik_dengan_chord": row.get("lirik") or row.get("lyrics") or "",
+                "sumber": os.path.basename(path)
+            })
+    return songs
+
+
+# ========= MAIN PROCESS =========
+def save_per_artist(song):
+    artist = song["artis"] or "Unknown"
+    slug = safe_slug(artist)
+    path = os.path.join(OUTPUT_DIR, f"{slug}.json")
+
+    # Baca data lama
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
     else:
-        # --- TXT ---
-        lines = text.strip().splitlines()
-        info["judul_lagu"] = lines[0].strip() if lines else filename
-        info["lirik_dengan_chord"] = "\n".join(lines)
+        data = {"artist": artist, "updated_at": now_iso(), "songs": []}
 
-    # --- Deteksi artis dari nama file ---
-    parts = os.path.splitext(filename)[0].split("-")
-    if len(parts) >= 2:
-        info["artis"] = parts[0].strip()
-        if not info["judul_lagu"]:
-            info["judul_lagu"] = parts[1].strip()
+    # Cek duplikat judul
+    existing_titles = [s["judul_lagu"].lower() for s in data["songs"]]
+    if song["judul_lagu"].lower() not in existing_titles:
+        data["songs"].append(song)
 
-    return info
+    data["updated_at"] = now_iso()
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# ====================================================
-# 🧩 MERGE PER ARTIS (SMART)
-# ====================================================
-def merge_song_into_artist(existing_data, new_song, threshold=0.8):
-    """Tambahkan / update lagu dengan deteksi kemiripan judul."""
-    if not existing_data:
-        existing_data = {
-            "artist": new_song.get("artis", ""),
-            "updated_at": now_iso(),
-            "songs": []
-        }
-
-    # cari lagu mirip
-    best_match = None
-    best_ratio = 0.0
-    for song in existing_data["songs"]:
-        ratio = similarity(song["judul_lagu"], new_song["judul_lagu"])
-        if ratio > best_ratio:
-            best_ratio = ratio
-            best_match = song
-
-    if best_match and best_ratio >= threshold:
-        # update lagu lama (replace fields kosong)
-        for k, v in new_song.items():
-            if v and not best_match.get(k):
-                best_match[k] = v
-        best_match["updated_at"] = now_iso()
-        print(f"🧠 Updated existing: {new_song['judul_lagu']} (similar {best_ratio:.0%})")
-    else:
-        # tambahkan lagu baru
-        existing_data["songs"].append(new_song)
-        existing_data["updated_at"] = now_iso()
-        print(f"✅ Added new: {new_song['judul_lagu']}")
-
-    return existing_data
-
-
-# ====================================================
-# 🚀 MAIN PROCESS
-# ====================================================
-def parse_all_files():
-    files = list(RAW_DIR.glob("*"))
-    for file_path in files:
+def parse_all():
+    files = glob.glob(os.path.join(RAW_DIR, "*"))
+    for file in files:
+        ext = os.path.splitext(file)[1].lower()
         try:
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                text = f.read()
-
-            song_data = extract_lyrics_info(text, file_path.name)
-            artist_slug = safe_slug(song_data["artis"] or "unknown")
-            artist_path = OUTPUT_DIR / f"{artist_slug}.json"
-
-            existing = load_json(artist_path)
-            merged = merge_song_into_artist(existing, song_data)
-            save_json(artist_path, merged)
-
+            if ext in [".html", ".htm"]:
+                song = parse_html(file)
+                save_per_artist(song)
+            elif ext == ".txt":
+                song = parse_txt(file)
+                save_per_artist(song)
+            elif ext == ".csv":
+                songs = parse_csv(file)
+                for s in songs:
+                    save_per_artist(s)
+            else:
+                print(f"⚠️ Skip {file} (format tidak dikenal)")
         except Exception as e:
-            print(f"❌ Error processing {file_path.name}: {e}")
+            print(f"❌ Error parsing {file}: {e}")
 
-    print("🎉 Done parsing all files!")
+    print("✅ Semua file berhasil diproses.")
 
 
 if __name__ == "__main__":
-    parse_all_files()
+    parse_all()
