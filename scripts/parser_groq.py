@@ -1,68 +1,77 @@
-import os, json, datetime, time
+import os, json, datetime, time, textwrap, requests
 from bs4 import BeautifulSoup
 from groq import Groq
-import tiktoken
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# 🔑 Ambil API key
 API_KEY = os.getenv("GROQ_API_KEY")
 if not API_KEY:
     raise RuntimeError("❌ GROQ_API_KEY tidak ditemukan di environment.")
 
 client = Groq(api_key=API_KEY)
 
-# Model terbaru Groq yang aktif
-MODEL_CANDIDATES = [
-    {"id": "llama-4-maverick-17b-128e-instruct", "max_tokens": 8192},
-    {"id": "llama-4-scout-17b-16e-instruct", "max_tokens": 8192},
-]
-
 RAW_DIR = "data_raw"
 OUT_DIR = "data_clean"
 os.makedirs(OUT_DIR, exist_ok=True)
 
-def count_tokens(text, encoding_name="cl100k_base"):
-    enc = tiktoken.get_encoding(encoding_name)
-    return len(enc.encode(text))
+# 🔹 Ambil daftar model aktif dari GroqCloud
+def get_active_models():
+    url = "https://api.groq.com/openai/v1/models"
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+    response = requests.get(url, headers=headers)
+    data = response.json()
+    active_models = [m["id"] for m in data.get("data", []) if not m.get("deprecated", False)]
+    if not active_models:
+        raise RuntimeError("❌ Tidak ada model aktif ditemukan.")
+    return active_models
 
-def split_text_by_tokens(text, max_tokens):
-    lines = text.splitlines()
-    chunks = []
-    current = []
-    current_tokens = 0
-    for line in lines:
-        line_tokens = count_tokens(line)
-        if current_tokens + line_tokens > max_tokens:
-            chunks.append("\n".join(current))
-            current = [line]
-            current_tokens = line_tokens
-        else:
-            current.append(line)
-            current_tokens += line_tokens
-    if current:
-        chunks.append("\n".join(current))
-    return chunks
+MODEL_CANDIDATES = get_active_models()
+print(f"✅ Model aktif ditemukan: {MODEL_CANDIDATES}")
 
+# 🔹 Request ke Groq dengan retry dan skip model gagal
 def groq_request(messages):
+    tried_models = []
     for model in MODEL_CANDIDATES:
+        if model in tried_models:
+            continue
+        tried_models.append(model)
         try:
-            print(f"🧠 Coba model: {model['id']}")
+            print(f"🧠 Coba model: {model}")
             resp = client.chat.completions.create(
-                model=model["id"],
+                model=model,
                 messages=messages,
                 temperature=0.2,
-                max_tokens=min(model["max_tokens"], 2048),
+                max_tokens=2048,
             )
-            print(f"✅ Sukses pakai model: {model['id']}")
+            print(f"✅ Sukses pakai model: {model}")
             return resp.choices[0].message.content
         except Exception as e:
-            print(f"⚠️ Model {model['id']} gagal: {e}")
-            time.sleep(1)
+            msg = str(e)
+            if "404" in msg or "decommissioned" in msg.lower():
+                print(f"⚠️ Model {model} tidak tersedia atau sudah deprecated, skip.")
+                continue
+            print(f"⚠️ Model {model} gagal karena {msg}, coba model lain.")
+            time.sleep(2)
     raise RuntimeError("❌ Semua model gagal dipakai.")
 
-def parse_chunk(chunk, idx, total):
-    print(f"🧩 Parsing bagian {idx}/{total}...")
-    prompt = f"""
-Ekstrak informasi artis dan lagu dari teks ini. Hasilkan JSON valid:
+# 🔹 Parser HTML
+def parse_html_with_groq(file_path):
+    with open(file_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+
+    soup = BeautifulSoup(html_content, "lxml")
+    text = soup.get_text(separator="\n", strip=True)
+
+    chunks = textwrap.wrap(text, 8000)
+    all_songs = []
+    artist_info = {}
+
+    print(f"📄 File dibagi jadi {len(chunks)} bagian...")
+
+    for i, chunk in enumerate(chunks, start=1):
+        print(f"🧩 Parsing bagian {i}/{len(chunks)}...")
+        prompt = f"""
+Ekstrak semua informasi artis dan lagu dari teks ini.
+Hasilkan JSON valid dengan format:
 {{
   "artist": {{
     "nama_asli": "",
@@ -89,40 +98,19 @@ Ekstrak informasi artis dan lagu dari teks ini. Hasilkan JSON valid:
 Teks:
 {chunk}
 """
-    try:
-        response_text = groq_request([
-            {"role": "system", "content": "Kamu parser JSON yang disiplin."},
-            {"role": "user", "content": prompt}
-        ])
-        return json.loads(response_text)
-    except Exception as e:
-        print(f"⚠️ Bagian {idx} gagal: {e}")
-        return None
-
-def parse_html_with_groq(file_path):
-    with open(file_path, "r", encoding="utf-8") as f:
-        html_content = f.read()
-
-    soup = BeautifulSoup(html_content, "lxml")
-    text = soup.get_text(separator="\n", strip=True)
-
-    max_tokens = MODEL_CANDIDATES[0]["max_tokens"] - 512
-    chunks = split_text_by_tokens(text, max_tokens)
-
-    all_songs = []
-    artist_info = {}
-    print(f"📄 File dibagi jadi {len(chunks)} bagian...")
-
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = [executor.submit(parse_chunk, chunk, i+1, len(chunks)) for i, chunk in enumerate(chunks)]
-        for future in as_completed(futures):
-            data = future.result()
-            if not data:
-                continue
+        try:
+            response_text = groq_request([
+                {"role": "system", "content": "Kamu parser JSON yang disiplin dan hanya keluarkan JSON valid."},
+                {"role": "user", "content": prompt}
+            ])
+            data = json.loads(response_text)
             if not artist_info and "artist" in data:
                 artist_info = data["artist"]
             if "songs" in data:
                 all_songs.extend(data["songs"])
+        except Exception as e:
+            print(f"⚠️ Bagian {i} gagal: {e}")
+            continue
 
     return {
         "artist": artist_info,
@@ -130,16 +118,19 @@ def parse_html_with_groq(file_path):
         "songs": all_songs
     }
 
-# Main process
+# 🚀 Main process
 html_files = [f for f in os.listdir(RAW_DIR) if f.lower().endswith(".html")]
+print(f"📂 Ditemukan {len(html_files)} file HTML untuk diproses.\n")
 
 for file_name in html_files:
     file_path = os.path.join(RAW_DIR, file_name)
+    print(f"🔄 Memproses: {file_name}")
+
     parsed_data = parse_html_with_groq(file_path)
     artist_name = parsed_data.get("artist", {}).get("nama_panggung", "unknown") or "unknown"
     out_file = os.path.join(OUT_DIR, f"{artist_name.replace(' ', '_').lower()}.json")
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(parsed_data, f, indent=2, ensure_ascii=False)
-    print(f"✅ Disimpan → {out_file}")
+    print(f"✅ Disimpan → {out_file}\n")
 
 print("🎉 Semua file selesai diproses!")
