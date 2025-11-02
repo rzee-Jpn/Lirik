@@ -25,6 +25,10 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: 📚 Install dependencies
+        run: |
+            pip install groq beautifulsoup4 lxml tqdm
+
       - name: 📚 Install dependencies (if available)
         run: |
           if [ -f requirements.txt ]; then
