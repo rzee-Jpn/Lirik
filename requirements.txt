@@ -1,4 +1,5 @@
-pip install --upgrade openai
+pip install 
+--upgrade openai
 lxml
 python-slugify
 rapidfuzz
