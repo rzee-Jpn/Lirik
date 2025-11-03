@@ -13,6 +13,8 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0   # penting agar bisa rebase dan push
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -28,13 +30,14 @@ jobs:
     - name: Run HuggingFace Parser
       env:
         HF_API_KEY: ${{ secrets.HF_API_KEY }}
-      run: python scripts/parser_hf.py
+      run: |
+        python scripts/parser_hf.py
 
     - name: Commit and push results
-  run: |
-    git config user.name "github-actions[bot]"
-    git config user.email "github-actions[bot]@users.noreply.github.com"
-    git add data_clean/*.json || echo "No JSON to commit"
-    git commit -m "🤖 Update hasil parsing HuggingFace" || echo "Nothing to commit"
-    git pull --rebase origin main || true
-    git push origin main
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add data_clean/*.json || echo "No JSON to commit"
+        git commit -m "🤖 Update hasil parsing HuggingFace" || echo "Nothing to commit"
+        git pull --rebase origin main || true
+        git push origin main
