@@ -14,7 +14,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0   # penting agar bisa pull & rebase tanpa konflik
+        fetch-depth: 0
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -23,28 +23,17 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install -r requirements.txt || true
         pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
         pip install transformers beautifulsoup4
 
     - name: Run HuggingFace Parser
-      env:
-        HF_API_KEY: ${{ secrets.HF_API_KEY }}
-      run: |
-        python scripts/parser_hf.py
+      run: python scripts/parser_hf.py
 
     - name: Commit and push results
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        
-        # pastikan semua perubahan di-stage (termasuk folder baru)
-        git add data_clean || echo "No folder to add"
-        git add data_clean/**/*.json || echo "No JSON to commit"
-
-        # buat commit hanya jika ada perubahan
-        git diff --cached --quiet || git commit -m "🤖 Update hasil parsing HuggingFace"
-
-        # hindari konflik push
+        git add data_clean/*.json || echo "No JSON to commit"
+        git commit -m "🤖 Update hasil parsing HuggingFace" || echo "Nothing to commit"
         git pull --rebase origin main || true
-        git push origin main || echo "⚠️ Push failed, mungkin tidak ada perubahan baru"
+        git push origin main
