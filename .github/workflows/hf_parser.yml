@@ -1,0 +1,24 @@
+name: HF HTML Parser
+
+on:
+  push:
+    paths:
+      - "data_raw/**"
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+
+      - name: Install dependencies
+        run: |
+          pip install transformers beautifulsoup4
+
+      - name: Run parser
+        run: python parser_hf.py
