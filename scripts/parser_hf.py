@@ -1,38 +1,55 @@
+# parser_hf.py
 import os
 import json
-import requests
 from bs4 import BeautifulSoup
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
-HF_TOKEN = os.getenv("HF_TOKEN")
-HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
-API_URL = "https://api-inference.huggingface.co/models/google/flan-t5-small"  # model ringan gratis
+# Konfigurasi model HF (gratis)
+MODEL_NAME = "google/flan-t5-small"  # model ringan, cocok untuk teks
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 
-RAW_DIR = "data_raw"
-OUTPUT_DIR = "data_clean"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# Pipeline summarization / parsing
+nlp = pipeline("text2text-generation", model=model, tokenizer=tokenizer)
 
-def parse_html_file(file_path):
+# Folder input/output
+INPUT_FOLDER = "data_raw"
+OUTPUT_FOLDER = "data_clean"
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+# Fungsi untuk ekstrak teks dari HTML
+def extract_text_from_html(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f, "html.parser")
-    
-    text = soup.get_text(separator="\n", strip=True)
-    
-    payload = {"inputs": f"Extract song data from this HTML:\n{text}"}
-    response = requests.post(API_URL, headers=HEADERS, json=payload)
-    
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"❌ Error {response.status_code} for {file_path}: {response.text}")
-        return {"error": response.text}
+    return soup.get_text(separator="\n", strip=True)
 
-for filename in os.listdir(RAW_DIR):
-    if filename.endswith(".html"):
-        file_path = os.path.join(RAW_DIR, filename)
-        print(f"🔄 Processing {filename}...")
-        result = parse_html_file(file_path)
-        
-        output_file = os.path.join(OUTPUT_DIR, f"{os.path.splitext(filename)[0]}.json")
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2)
-        print(f"✅ Saved → {output_file}")
+# Fungsi untuk parsing dengan HF
+def parse_text(text):
+    # Contoh: summarization / simplification
+    result = nlp(text, max_length=512, truncation=True)
+    return result[0]['generated_text']
+
+# Proses semua file di folder
+all_files = [f for f in os.listdir(INPUT_FOLDER) if f.endswith(".html")]
+
+for file_name in all_files:
+    print(f"Processing {file_name}...")
+    text = extract_text_from_html(os.path.join(INPUT_FOLDER, file_name))
+    
+    # Bagi text menjadi batch jika terlalu panjang
+    batch_size = 1000  # karakter per batch
+    parsed_batches = []
+    for i in range(0, len(text), batch_size):
+        batch_text = text[i:i+batch_size]
+        parsed = parse_text(batch_text)
+        parsed_batches.append(parsed)
+    
+    # Gabungkan hasil
+    parsed_text = "\n".join(parsed_batches)
+    
+    # Simpan hasil
+    out_path = os.path.join(OUTPUT_FOLDER, file_name.replace(".html", ".json"))
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump({"parsed_text": parsed_text}, f, ensure_ascii=False, indent=2)
+
+    print(f"Saved → {out_path}")
