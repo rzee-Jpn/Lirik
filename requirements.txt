@@ -1,4 +1,4 @@
-beautifulsoup4
+pip install --upgrade openai
 lxml
 python-slugify
 rapidfuzz
@@ -6,4 +6,3 @@ requests
 pandas
 python-dotenv
 beautifulsoup4
-openai
