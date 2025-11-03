@@ -1,55 +1,71 @@
-# parser_hf.py
 import os
 import json
 from bs4 import BeautifulSoup
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 
-# Konfigurasi model HF (gratis)
-MODEL_NAME = "google/flan-t5-small"  # model ringan, cocok untuk teks
+# ==== MODEL HF ====
+MODEL_NAME = "google/flan-t5-base"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
+parser = pipeline("text2text-generation", model=model, tokenizer=tokenizer)
 
-# Pipeline summarization / parsing
-nlp = pipeline("text2text-generation", model=model, tokenizer=tokenizer)
-
-# Folder input/output
+# ==== FOLDER ====
 INPUT_FOLDER = "data_raw"
 OUTPUT_FOLDER = "data_clean"
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# Fungsi untuk ekstrak teks dari HTML
+# ==== EXTRACT TEKS DARI HTML ====
 def extract_text_from_html(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f, "html.parser")
     return soup.get_text(separator="\n", strip=True)
 
-# Fungsi untuk parsing dengan HF
-def parse_text(text):
-    # Contoh: summarization / simplification
-    result = nlp(text, max_length=512, truncation=True)
+# ==== PARSING KE STRUKTUR JSON ====
+def parse_to_json(text):
+    prompt = f"""
+    Ekstrak dan rapikan data berikut dalam format JSON:
+    - nama_artis
+    - nama_panggung
+    - tanggal_lahir
+    - asal
+    - media_sosial
+    - album (daftar)
+    - single (daftar)
+    - label
+    - pembuat_lirik
+    - composer
+    - arranger
+    Jika data tidak ditemukan, kosongkan nilainya.
+
+    Teks sumber:
+    {text[:1500]}
+    """
+    result = parser(prompt, max_new_tokens=512, truncation=True)
     return result[0]['generated_text']
 
-# Proses semua file di folder
-all_files = [f for f in os.listdir(INPUT_FOLDER) if f.endswith(".html")]
+# ==== PROSES SEMUA FILE ====
+for file_name in os.listdir(INPUT_FOLDER):
+    if not file_name.endswith(".html"):
+        continue
 
-for file_name in all_files:
-    print(f"Processing {file_name}...")
+    print(f"📄 Memproses: {file_name}")
     text = extract_text_from_html(os.path.join(INPUT_FOLDER, file_name))
-    
-    # Bagi text menjadi batch jika terlalu panjang
-    batch_size = 1000  # karakter per batch
-    parsed_batches = []
-    for i in range(0, len(text), batch_size):
-        batch_text = text[i:i+batch_size]
-        parsed = parse_text(batch_text)
-        parsed_batches.append(parsed)
-    
-    # Gabungkan hasil
-    parsed_text = "\n".join(parsed_batches)
-    
-    # Simpan hasil
-    out_path = os.path.join(OUTPUT_FOLDER, file_name.replace(".html", ".json"))
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({"parsed_text": parsed_text}, f, ensure_ascii=False, indent=2)
 
-    print(f"Saved → {out_path}")
+    try:
+        parsed_json = parse_to_json(text)
+
+        # Coba ubah ke JSON valid
+        try:
+            data = json.loads(parsed_json)
+        except json.JSONDecodeError:
+            data = {"raw_text": parsed_json}
+
+        # Simpan hasil
+        out_path = os.path.join(OUTPUT_FOLDER, file_name.replace(".html", ".json"))
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        print(f"✅ Disimpan ke {out_path}")
+
+    except Exception as e:
+        print(f"❌ Gagal parsing {file_name}: {e}")
