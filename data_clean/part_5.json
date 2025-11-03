@@ -1,3 +1,0 @@
-{
-  "raw_text": "Ekstrak dan rapat data dalam format JSON: - nama_artis - nama_panggung - tanggal_lahir - asal - media_sosial - album (daftar) - single (daftar) - label - pembuat_lirik - composer - arranger Jika data tidak ditemut, kosong nilainya."
-}
