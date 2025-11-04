@@ -1,19 +1,24 @@
-import os, json, glob
+import os
+import json
 from groq import Groq
+
+# Pastikan kamu sudah set environment variable:
+# GROQ_API_KEY = "key_anda_dari_console.groq.com"
+
+RAW_DIR = "data_raw"
+OUTPUT_DIR = "data_clean"
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-INPUT_DIR = "data_raw"
-OUTPUT_DIR = "data_clean"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+TEMPLATE_PROMPT = """
+Kamu adalah parser musik profesional.
+Tugasmu adalah membaca teks deskripsi lagu atau artis di bawah ini dan mengubahnya
+menjadi JSON dengan format seperti berikut (jangan ubah struktur kunci):
 
-def extract_info(raw_text: str):
-    prompt = f"""
-Kamu adalah asisten yang mengekstrak informasi musik dari teks mentah (biasanya dari blog atau artikel lirik).
-Bersihkan teks dari HTML, lalu ubah jadi struktur JSON berikut:
-
-{{
-  "Bio / Profil": {{
+{
+  "Bio / Profil": {
     "Nama lengkap & nama panggung": "",
     "Asal / domisili": "",
     "Tanggal lahir": "",
@@ -21,15 +26,15 @@ Bersihkan teks dari HTML, lalu ubah jadi struktur JSON berikut:
     "Influences / inspirasi": "",
     "Cerita perjalanan musik": "",
     "Foto profil": "",
-    "Link media sosial": {{
+    "Link media sosial": {
       "BandLab": "",
       "YouTube": "",
       "Spotify": "",
       "Instagram": ""
-    }}
-  }},
+    }
+  },
   "Diskografi": [
-    {{
+    {
       "Nama album/single": "",
       "Tanggal rilis": "",
       "Label": "",
@@ -37,7 +42,7 @@ Bersihkan teks dari HTML, lalu ubah jadi struktur JSON berikut:
       "Cover art": "",
       "Produksi oleh / kolaborator tetap": "",
       "Lagu / Song List": [
-        {{
+        {
           "Judul lagu": "",
           "Composer": "",
           "Lyricist": "",
@@ -49,49 +54,62 @@ Bersihkan teks dari HTML, lalu ubah jadi struktur JSON berikut:
           "Key": "",
           "Chord & lyrics": "",
           "Terjemahan": ""
-        }}
+        }
       ]
-    }}
+    }
   ]
-}}
+}
 
-Aturan penting:
-1. Jika teks menyebut nama artis (misal “Aimer”, “HYDE”), isi di “Nama lengkap & nama panggung”.
-2. Jika teks memuat tanggal rilis (contoh “dirilis 18 Maret 2020”), isi di “Tanggal rilis”.
-3. Jika teks menyebut durasi (misal “3:36 menit”), isi ke “Durasi”.
-4. Jika ada bagian “KANJI”, “ROMAJI”, “Terjemahan”, simpan ke “Chord & lyrics” dan “Terjemahan”.
-5. Jangan ubah bahasa lirik. Hanya bersihkan format HTML.
-6. Jika beberapa lagu disebut, buat array “Lagu / Song List” berisi semuanya.
-7. Pastikan output **hanya JSON valid**, tidak mengandung teks lain.
-
-Sekarang proses teks berikut dan hasilkan JSON terstruktur:
-
-{raw_text}
-
+Instruksi tambahan:
+- Pastikan output berupa **JSON valid**.
+- Abaikan judul anime, film, atau serial TV (hanya fokus pada lagu dan albumnya).
+- Jika data tidak ditemukan, biarkan nilai string kosong.
+- Ambil semua info yang ada di teks (judul, durasi, kolaborator, label, dll).
 """
+
+def parse_with_groq(text: str):
+    response = client.chat.completions.create(
+        model="mixtral-8x7b-32768",
+        temperature=0.2,
+        messages=[
+            {"role": "system", "content": "Kamu harus selalu output JSON valid dan lengkap."},
+            {"role": "user", "content": TEMPLATE_PROMPT + "\n\nTeks:\n" + text}
+        ]
+    )
+
+    content = response.choices[0].message.content.strip()
     try:
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-        )
-        content = response.choices[0].message.content
         return json.loads(content)
-    except Exception as e:
-        print("❌ Error:", e)
-        return {"error": str(e), "raw_snippet": raw_text[:400]}
+    except json.JSONDecodeError:
+        print("⚠️ JSON invalid, mencoba perbaikan sederhana...")
+        # Coba bersihkan teks
+        fixed = content[content.find("{") : content.rfind("}") + 1]
+        try:
+            return json.loads(fixed)
+        except Exception:
+            print("❌ Tidak bisa parse JSON.")
+            return {"error": "Invalid JSON", "raw": content}
+
 
 def main():
-    files = glob.glob(f"{INPUT_DIR}/*.json")
-    for path in files:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        raw_text = data.get("raw_text", "")
-        parsed_info = extract_info(raw_text)
-        output_path = os.path.join(OUTPUT_DIR, os.path.basename(path))
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump({"raw_text": raw_text, "parsed_info": parsed_info}, f, ensure_ascii=False, indent=2)
-        print(f"✅ Saved: {output_path}")
+    for file in os.listdir(RAW_DIR):
+        if not file.endswith(".txt"):
+            continue
+
+        raw_path = os.path.join(RAW_DIR, file)
+        out_path = os.path.join(OUTPUT_DIR, file.replace(".txt", ".json"))
+
+        print(f"🧠 Memproses: {file} ...")
+        with open(raw_path, "r", encoding="utf-8") as f:
+            raw_text = f.read().strip()
+
+        parsed = parse_with_groq(raw_text)
+
+        with open(out_path, "w", encoding="utf-8") as out:
+            json.dump({"raw_text": raw_text, "parsed_info": parsed}, out, indent=2, ensure_ascii=False)
+
+        print(f"✅ Disimpan ke {out_path}\n")
+
 
 if __name__ == "__main__":
     main()
