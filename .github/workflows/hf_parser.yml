@@ -1,20 +1,19 @@
-name: HuggingFace Parser
+name: Groq Music Parser
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 jobs:
-  parse_html:
+  parse_groq:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # penting agar bisa rebase & push
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -23,28 +22,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install transformers beautifulsoup4 groq
+          pip install groq
 
-      - name: Run HuggingFace Parser
+      - name: Run Groq Parser
         env:
-          HF_API_KEY: ${{ secrets.HF_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: |
-          if [ -f scripts/parser_groq.py ]; then
-            echo "🚀 Menjalankan parser_groq.py (Groq version)..."
-            python scripts/parser_groq.py
-          else
-            echo "⚙️ Menjalankan parser_hf.py (HuggingFace version)..."
-            python scripts/parser_hf.py
-          fi
+        run: python scripts/parser_groq.py
 
-      - name: Commit and push results
+      - name: Commit and push parsed data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data_clean/*.json || echo "No JSON to commit"
-          git commit -m "🤖 Update hasil parsing HuggingFace/Groq" || echo "Nothing to commit"
+          git add data_clean/*.json || echo "Tidak ada file untuk commit"
+          git commit -m "🤖 Update hasil parsing Groq" || echo "Tidak ada perubahan"
           git pull --rebase origin main || true
-          git push origin main || echo "Nothing to push"
+          git push origin main
