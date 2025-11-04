@@ -1,193 +1,160 @@
 import os
-import re
 import json
+from groq import Groq
 from bs4 import BeautifulSoup
-from pathlib import Path
 
-INPUT_DIR = "data_raw"
-OUTPUT_DIR = "data_clean"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# --- KONFIGURASI ---
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+RAW_DIR = "data_raw"
+OUT_DIR = "data_clean"
+MODEL = os.getenv("MODEL", "llama-3.3-70b-versatile")
 
-# ============ HTML CLEANER ============
-def clean_html(html):
-    soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text(separator="\n").strip()
-    text = re.sub(r'\n+', '\n', text)
-    return text
+# --- UTILITAS ---
+def clean_text(html_content):
+    """Bersihkan HTML menjadi plain text."""
+    soup = BeautifulSoup(html_content, "html.parser")
+    return soup.get_text(separator="\n", strip=True)
 
+def merge_data(existing, new):
+    """Merge JSON lama dengan data baru secara fleksibel."""
+    # Merge Bio
+    bio_existing = existing.get("parsed_info", {}).get("Bio / Profil", {})
+    bio_new = new.get("parsed_info", {}).get("Bio / Profil", {})
+    for k, v in bio_new.items():
+        if v:  # update only if there's new data
+            bio_existing[k] = v
+    existing["parsed_info"]["Bio / Profil"] = bio_existing
 
-# ============ LYRICS SECTION SPLITTER ============
-def extract_lyrics_sections(text):
-    sections = {"kanji": "", "romaji": "", "terjemahan": ""}
-    current = None
-    for line in text.splitlines():
-        l = line.strip().lower()
-        if "kanji" in l:
-            current = "kanji"
-            continue
-        elif "romaji" in l:
-            current = "romaji"
-            continue
-        elif "indonesia" in l or "terjemahan" in l:
-            current = "terjemahan"
-            continue
-        if current:
-            sections[current] += line + "\n"
-    return sections
+    # Merge Diskografi
+    albums_existing = existing.get("parsed_info", {}).get("Diskografi", [])
+    albums_new = new.get("parsed_info", {}).get("Diskografi", [])
 
+    for album_new in albums_new:
+        match = next((a for a in albums_existing if a.get("Nama album/single") == album_new.get("Nama album/single")), None)
+        if match:
+            # Update lagu list
+            existing_songs = match.get("Lagu / Song List", [])
+            for song_new in album_new.get("Lagu / Song List", []):
+                if not any(s.get("Judul lagu") == song_new.get("Judul lagu") for s in existing_songs):
+                    existing_songs.append(song_new)
+            match["Lagu / Song List"] = existing_songs
+            # Update field album lainnya jika ada data baru
+            for key, val in album_new.items():
+                if val and key != "Lagu / Song List":
+                    match[key] = val
+        else:
+            albums_existing.append(album_new)
 
-# ============ PROFILE TEMPLATE ============
-def make_artist_profile(name):
-    return {
-        "Nama lengkap & nama panggung": name,
-        "Asal / domisili": "",
-        "Tanggal lahir": "",
-        "Genre musik": "",
-        "Influences / inspirasi": "",
-        "Cerita perjalanan musik": "",
-        "Foto profil": "",
-        "Link media sosial": {
-            "BandLab": "",
-            "YouTube": "",
-            "Spotify": "",
-            "Instagram": ""
-        }
-    }
+    existing["parsed_info"]["Diskografi"] = albums_existing
+    return existing
 
+def save_json(artist, album, data):
+    """Simpan JSON per artis dan per album."""
+    artist_folder = os.path.join(OUT_DIR, artist)
+    os.makedirs(artist_folder, exist_ok=True)
+    out_path = os.path.join(artist_folder, f"{album}.json")
 
-# ============ DETEKSI FEATURING & COMPOSER ============
-def detect_metadata(text):
-    featuring = ""
-    composer = ""
-    lyricist = ""
-    
-    # featuring / feat / ft
-    feat_match = re.search(r"(?:feat\.?|ft\.?)\s+([A-Za-z0-9 '&-]+)", text, re.IGNORECASE)
-    if feat_match:
-        featuring = feat_match.group(1).strip()
-    
-    # composer / music by
-    comp_match = re.search(r"(?:music by|composed by|composer:)\s*([A-Za-z0-9 '&,-]+)", text, re.IGNORECASE)
-    if comp_match:
-        composer = comp_match.group(1).strip()
-    
-    # lyricist / written by
-    lyr_match = re.search(r"(?:lyrics? by|written by|lirik oleh)\s*([A-Za-z0-9 '&,-]+)", text, re.IGNORECASE)
-    if lyr_match:
-        lyricist = lyr_match.group(1).strip()
-    
-    return featuring, composer, lyricist
+    if os.path.exists(out_path):
+        with open(out_path, "r", encoding="utf-8") as f:
+            try:
+                existing = json.load(f)
+                data = merge_data(existing, data)
+            except:
+                pass  # fallback: tulis ulang data baru
 
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"✅ Disimpan: {out_path}")
 
-# ============ SONG PARSER ============
-def parse_songs(album_text, album_name):
-    pattern = r"Lagu\s+([A-Za-z0-9&'\" ]+)\s+\"([^\"]+)\""
-    parts = re.split(pattern, album_text)
-    chunks = []
-    for i in range(1, len(parts), 3):
-        artist_ref = parts[i].strip()
-        song_title = parts[i + 1].strip()
-        content = parts[i + 2].strip()
-        chunks.append((song_title, content))
-    if not chunks:
-        chunks = [("Unknown Song", album_text)]
+def parse_with_groq(raw_text):
+    """Meminta Groq untuk menstrukturkan data HTML menjadi JSON."""
+    prompt = f"""
+Kamu adalah sistem yang menstrukturkan data musik/artis dari teks mentah menjadi JSON. 
+Jika tidak ada data, field dikosongi. Teks mentah bisa memiliki bio artis, album, lagu, lirik, dll. 
+JSON harus fleksibel, bisa menambah field baru jika ditemukan data baru. 
+Berikan output hanya JSON valid.
 
-    lagu_list = []
-    for song_title, song_text in chunks:
-        sections = extract_lyrics_sections(song_text)
-        featuring, composer, lyricist = detect_metadata(song_text)
-
-        tanggal = re.search(r"dirilis(?: pada)? ([0-9]{1,2} [A-Za-z]+ [0-9]{4})", song_text)
-        tanggal_rilis = tanggal.group(1) if tanggal else ""
-        durasi = re.search(r"(\d:\d{2})", song_text)
-        durasi_str = durasi.group(1) if durasi else ""
-
-        label = ""
-        for l in ["Virgin Music", "Sony Music", "Universal", "Warner"]:
-            if l.lower() in song_text.lower():
-                label = l
-
-        lagu_list.append({
-            "Judul lagu": song_title,
-            "Composer": composer,
-            "Lyricist": lyricist,
-            "Featuring": featuring,
-            "Tahun rilis": tanggal_rilis[-4:] if tanggal_rilis else "",
-            "Album asal": album_name,
-            "Durasi": durasi_str,
+Contoh struktur minimal (boleh ada field tambahan):
+{{
+  "raw_text": "...",
+  "parsed_info": {{
+    "Bio / Profil": {{
+      "Nama lengkap & nama panggung": "",
+      "Asal / domisili": "",
+      "Tanggal lahir": "",
+      "Genre musik": "",
+      "Influences / inspirasi": "",
+      "Cerita perjalanan musik": "",
+      "Foto profil": "",
+      "Link media sosial": ""
+    }},
+    "Diskografi": [
+      {{
+        "Nama album/single": "",
+        "Tanggal rilis": "",
+        "Label": "",
+        "Jumlah lagu": "",
+        "Cover art": "",
+        "Produksi oleh / kolaborator tetap": "",
+        "Lagu / Song List": [
+          {{
+            "Judul lagu": "",
+            "Composer": "",
+            "Lyricist": "",
+            "Featuring": "",
+            "Tahun rilis": "",
+            "Album asal": "",
+            "Durasi": "",
             "Genre": "",
             "Key": "",
-            "Chord & lyrics": sections["kanji"].strip(),
-            "Terjemahan": sections["terjemahan"].strip()
-        })
+            "Chord & lyrics": "",
+            "Terjemahan": ""
+          }}
+        ]
+      }}
+    ]
+  }}
+}}
 
-    return lagu_list
+Teks mentah:
+\"\"\"{raw_text}\"\"\"
+"""
+    completion = client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3
+    )
+    return completion.choices[0].message.content
 
-
-# ============ DATA MERGER ============
-def merge_artist_data(parsed_info, artist_name):
-    folder = Path(OUTPUT_DIR)
-    folder.mkdir(parents=True, exist_ok=True)
-    file_path = folder / f"{artist_name.lower().replace(' ', '_')}.json"
-
-    if not file_path.exists():
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(parsed_info, f, indent=2, ensure_ascii=False)
-        print(f"🆕 File baru dibuat: {file_path}")
-        return
+# --- PROSES UTAMA ---
+for file in os.listdir(RAW_DIR):
+    if not file.endswith(".html"):
+        continue
+    file_path = os.path.join(RAW_DIR, file)
+    print(f"🧠 Memproses: {file}")
 
     with open(file_path, "r", encoding="utf-8") as f:
-        existing_data = json.load(f)
+        html = f.read()
 
-    # Gabung diskografi
-    for new_album in parsed_info.get("Diskografi", []):
-        existing_album = next(
-            (a for a in existing_data["Diskografi"]
-             if a["Nama album/single"].lower() == new_album["Nama album/single"].lower()),
-            None
-        )
-        if existing_album:
-            for new_song in new_album.get("Lagu / Song List", []):
-                existing_titles = [s["Judul lagu"].lower() for s in existing_album["Lagu / Song List"]]
-                if new_song["Judul lagu"].lower() not in existing_titles:
-                    existing_album["Lagu / Song List"].append(new_song)
+    text = clean_text(html)
+    try:
+        json_text = parse_with_groq(text)
+        try:
+            data = json.loads(json_text)
+        except:
+            # fallback kalau JSON gagal: simpan minimal
+            data = {"raw_text": text, "parsed_info": {"Bio / Profil": {}, "Diskografi": []}}
+            print(f"⚠️ JSON tidak valid untuk {file}, menyimpan teks mentah.")
+
+        artist = data.get("parsed_info", {}).get("Bio / Profil", {}).get("Nama lengkap & nama panggung", "Unknown") or "Unknown"
+        album_list = data.get("parsed_info", {}).get("Diskografi", [])
+        if album_list:
+            for album_entry in album_list:
+                album_name = album_entry.get("Nama album/single", os.path.splitext(file)[0])
+                save_json(artist.strip().replace(" ", "_"), album_name.strip().replace(" ", "_"), data)
         else:
-            existing_data["Diskografi"].append(new_album)
+            # tidak ada album → simpan 1 file per artis
+            save_json(artist.strip().replace(" ", "_"), os.path.splitext(file)[0], data)
 
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(existing_data, f, indent=2, ensure_ascii=False)
-
-    print(f"✅ Data artis '{artist_name}' diperbarui: {file_path}")
-
-
-# ============ MAIN LOOP ============
-for artist_folder in Path(INPUT_DIR).iterdir():
-    if not artist_folder.is_dir():
-        continue
-
-    artist_name = artist_folder.name
-    print(f"\n🎤 Memproses artis: {artist_name}")
-
-    for file_path in artist_folder.glob("*.html"):
-        album_name = file_path.stem.replace("_", " ").title()
-
-        with open(file_path, "r", encoding="utf-8") as f:
-            html = f.read()
-
-        clean_text = clean_html(html)
-        lagu_list = parse_songs(clean_text, album_name)
-
-        parsed_info = {
-            "Bio / Profil": make_artist_profile(artist_name),
-            "Diskografi": [{
-                "Nama album/single": album_name,
-                "Tanggal rilis": "",
-                "Label": "",
-                "Jumlah lagu": str(len(lagu_list)),
-                "Cover art": "",
-                "Produksi oleh / kolaborator tetap": "",
-                "Lagu / Song List": lagu_list
-            }]
-        }
-
-        merge_artist_data(parsed_info, artist_name)
+    except Exception as e:
+        print(f"⚠️ Gagal memproses {file}: {e}")
