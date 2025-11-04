@@ -9,6 +9,7 @@ on:
 jobs:
   parse_groq:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,7 +23,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install groq
+          pip install --upgrade pip
+          pip install groq beautifulsoup4 requests
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          pip install transformers
 
       - name: Run Groq Parser
         env:
