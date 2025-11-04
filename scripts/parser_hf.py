@@ -1,61 +1,80 @@
 import os
+import re
 import json
-from bs4 import BeautifulSoup
 from transformers import pipeline
 
-# ✅ Model publik gratis (tidak perlu API key)
-MODEL_NAME = "google/flan-t5-small"
+# ==============================
+# ⚙️ Konfigurasi
+# ==============================
+MODEL_NAME = "google/flan-t5-base"
+INPUT_DIR = "data_raw"
+OUTPUT_DIR = "data_clean"
 
-# Siapkan pipeline Hugging Face
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# ==============================
+# 🔧 Load Model
+# ==============================
+print("🔄 Memuat model HuggingFace...")
 nlp = pipeline("text2text-generation", model=MODEL_NAME)
+print("✅ Model siap digunakan!")
 
-# Folder input/output
-INPUT_FOLDER = "data_raw"
-OUTPUT_FOLDER = "data_clean"
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-
-# Fungsi untuk ekstrak teks dari HTML
-def extract_text_from_html(file_path):
-    with open(file_path, "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f, "html.parser")
-    return soup.get_text(separator="\n", strip=True)
-
-# Fungsi untuk memanggil model HF dengan batching otomatis
-def generate_response(prompt, max_length=512):
+# ==============================
+# 🧠 Fungsi bantu
+# ==============================
+def extract_json(text):
+    """Ambil JSON valid dari teks model"""
     try:
-        result = nlp(prompt, max_length=max_length, truncation=True)
-        return result[0]['generated_text']
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            return json.loads(match.group())
     except Exception as e:
-        print(f"⚠️ Error: {e}")
-        return ""
+        print("⚠️ JSON tidak valid:", e)
+    return {"raw_output": text}
 
-# Proses setiap file HTML
-for file_name in os.listdir(INPUT_FOLDER):
+
+def split_artists(text):
+    """
+    Deteksi multi-artis dalam satu teks.
+    Berdasarkan pola umum seperti 'Lirik Lagu [Nama Artis]'
+    """
+    pattern = r"(?:Lirik\s+Lagu|Lagu)\s+([A-Z][A-Za-z0-9 _'\-]+)"
+    artists = re.findall(pattern, text)
+    if not artists:
+        artists = ["Unknown"]
+    parts = re.split(pattern, text)
+    result = []
+    for i, artist in enumerate(artists):
+        content = parts[i + 1] if i + 1 < len(parts) else text
+        result.append((artist.strip(), content.strip()))
+    return result
+
+
+# ==============================
+# 🚀 Jalankan Parsing
+# ==============================
+for file_name in os.listdir(INPUT_DIR):
     if not file_name.endswith(".html"):
         continue
 
-    print(f"🎵 Processing {file_name}...")
-    text = extract_text_from_html(os.path.join(INPUT_FOLDER, file_name))
+    print(f"📝 Memproses: {file_name}")
+    with open(os.path.join(INPUT_DIR, file_name), "r", encoding="utf-8") as f:
+        text = f.read()
 
-    # Bagi teks panjang agar tidak error
-    chunk_size = 1500
-    chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
+    # Deteksi artis ganda
+    artist_blocks = split_artists(text)
 
-    # Gabungkan hasil parsing tiap bagian
-    artist_info = []
-    for i, chunk in enumerate(chunks, 1):
-        print(f"🧩 Parsing bagian {i}/{len(chunks)}...")
+    for artist_name, artist_text in artist_blocks:
+        print(f"🎤 Memproses artis: {artist_name}")
+
         prompt = f"""
-        Ekstrak dan susun informasi dari teks berikut dalam format JSON terstruktur:
-        ---
-        {chunk}
-        ---
-        Format hasil JSON yang diharapkan:
+        Dari teks berikut, susun informasi artis musik dan karyanya secara rapi dalam JSON.
+        Gunakan struktur berikut dan isi sebisa mungkin berdasarkan konteks teks:
 
         {{
           "Bio / Profil": {{
             "Nama lengkap": "",
-            "Nama panggung": "",
+            "Nama panggung": "{artist_name}",
             "Asal / domisili": "",
             "Tanggal lahir": "",
             "Genre musik": "",
@@ -95,18 +114,26 @@ for file_name in os.listdir(INPUT_FOLDER):
             }}
           ]
         }}
+
+        Teks:
+        {artist_text}
         """
 
-        parsed = generate_response(prompt)
-        if parsed:
-            artist_info.append(parsed)
+        # Jalankan model
+        result = nlp(prompt, max_new_tokens=2048)[0]["generated_text"]
 
-    # Gabungkan semua hasil bagian
-    combined_output = "\n".join(artist_info)
+        # Ambil JSON valid
+        parsed = extract_json(result)
 
-    # Simpan hasil JSON
-    out_path = os.path.join(OUTPUT_FOLDER, file_name.replace(".html", ".json"))
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({"raw_text": text, "parsed_info": combined_output}, f, ensure_ascii=False, indent=2)
+        # Simpan hasil ke file terpisah
+        safe_name = re.sub(r"[^\w\-_ ]", "_", artist_name)
+        out_path = os.path.join(OUTPUT_DIR, f"{safe_name}.json")
+        with open(out_path, "w", encoding="utf-8") as out_file:
+            json.dump({
+                "raw_text": artist_text,
+                "parsed_info": parsed
+            }, out_file, ensure_ascii=False, indent=2)
 
-    print(f"✅ Hasil disimpan ke {out_path}\n")
+        print(f"✅ Hasil disimpan ke {safe_name}.json")
+
+print("🎉 Semua artis & file selesai diproses!")
