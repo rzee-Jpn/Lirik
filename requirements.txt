@@ -1,9 +1,0 @@
-transformers
-torch
-lxml
-python-slugify
-rapidfuzz
-requests
-pandas
-python-dotenv
-beautifulsoup4
