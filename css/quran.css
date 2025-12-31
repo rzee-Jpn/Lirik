@@ -1,0 +1,6 @@
+/* Reader ayat details */
+.ayat .arab { word-break: keep-all; }
+.arti { margin-top: .5rem; font-size:.95rem; opacity:.86; }
+
+/* Home: override spacing (home page doesn't need big top pad) */
+.page-home .ayah-container { padding-top: 0; }
