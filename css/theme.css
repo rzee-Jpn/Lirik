@@ -1,0 +1,35 @@
+/* Theme variables */
+body.theme-light {
+  --bg: #ffffff;
+  --text: #222222;
+  --accent: #3b82f6;
+  --panel-bg: rgba(255,255,255,0.85);
+}
+
+body.theme-dark {
+  --bg: #0f1113;
+  --text: #e6e7e8;
+  --accent: #facc15;
+  --panel-bg: rgba(22,24,26,0.8);
+}
+
+body.theme-sepia {
+  --bg: #f4ecd8;
+  --text: #3a2f1c;
+  --accent: #a16207;
+  --panel-bg: rgba(244,236,216,0.94);
+}
+
+body.theme-paper {
+  --bg: #f6f1e7;
+  --text: #2a2a2a;
+  --accent: #8c6d3f;
+  --panel-bg: rgba(246,241,231,0.95);
+}
+
+/* apply */
+body {
+  background: var(--bg);
+  color: var(--text);
+  transition: background .25s ease, color .25s ease;
+}
