@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>Al-Qur'an — Reader</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+  <link rel="stylesheet" href="css/main.css" />
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/quran.css" />
+
+  <!-- GSAP CDN -->
+  <script src="https://unpkg.com/gsap@3/dist/gsap.min.js"></script>
+  
+</head>
+<body class="theme-paper page-reader">
+
+  <!-- HEADBAR -->
+  <header id="headbar" class="headbar" role="banner">
+    <a href="home.html" class="back" aria-label="Kembali">←</a>
+    <span id="judul" class="head-title">Pilih Surah</span>
+    <button id="toggleSidebar" class="toggle-sidebar" aria-label="Buka sidebar">☰</button>
+  </header>
+
+  <!-- overlay untuk sidebar -->
+  <div id="overlay" class="overlay hidden" aria-hidden="true"></div>
+
+  <!-- floating footer brand (by anglumea) -->
+  <div id="footerBrand" class="footer-brand">by anglumea</div>
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar" class="sidebar" aria-hidden="true" role="complementary">
+    <div class="sidebar-top">
+      <button id="closeSidebar" class="close-sidebar" aria-label="Tutup">✕</button>
+      <h3>Mode Tema</h3>
+      <div class="theme-options" role="list">
+        <button data-theme="theme-light">Light</button>
+        <button data-theme="theme-dark">Dark</button>
+        <button data-theme="theme-sepia">Sepia</button>
+        <button data-theme="theme-paper">Paper</button>
+      </div>
+    </div>
+
+    <hr>
+
+    <section>
+      <h4>Terakhir dibaca</h4>
+      <div id="lastRead" class="last-read">Belum ada</div>
+    </section>
+
+    <hr>
+
+    <section>
+      <h4>Bookmark</h4>
+      <div id="bookmarkList" class="bookmark-list">Belum ada</div>
+      <div style="margin-top:.5rem">
+        <button id="clearBookmarks" class="btn-ghost">Hapus semua</button>
+      </div>
+    </section>
+  </aside>
+
+  <!-- floating terjemah -->
+  <button id="toggleArti" class="toggle-float" aria-pressed="false">Terjemah</button>
+
+  <!-- MAIN AYAT -->
+  <main id="ayat" class="ayah-container" role="main" tabindex="0"></main>
+
+  <script src="js/index.js" defer></script>
+</body>
+</html>
